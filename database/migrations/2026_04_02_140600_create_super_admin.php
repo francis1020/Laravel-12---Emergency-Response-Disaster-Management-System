@@ -3,30 +3,32 @@
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Hash;
 
 return new class extends Migration
 {
+    /**
+     * Run the migrations.
+     */
     public function up(): void
     {
-        Schema::create('user_details', function (Blueprint $table) {
-            $table->id();
-            
-            // Link to the users table
-            $table->foreignId('user_id')->constrained()->onDelete('cascade');
-            
-            // Additional normal user info
-            $table->string('contact_number', 11)->nullable();
-            $table->string('address')->nullable();
-            $table->date('birthdate')->nullable();
-            $table->string('gender')->nullable(); // e.g., male, female, other
-            $table->string('profile_picture')->nullable(); // optional
-
-            $table->timestamps();
-        });
+        DB::table('users')->insert([
+            'name' => 'Super Admin',
+            'email' => 'medallofrancisjude@gmail.com',
+            'password' => Hash::make('admin123'),
+            'type' => 3, // Super Admin
+            'email_verified_at' => now(),
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
     }
 
+    /**
+     * Reverse the migrations.
+     */
     public function down(): void
     {
-        Schema::dropIfExists('user_details');
+        DB::table('users')->where('email', 'medallofrancisjude@gmail.com')->delete();
     }
 };
