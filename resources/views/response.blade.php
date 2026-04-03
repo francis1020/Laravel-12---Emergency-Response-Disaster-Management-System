@@ -105,6 +105,7 @@
 
         let responderMarker = null;
         let routeControl = null;
+        let routePolyline = null; // Persistent polyline that stays visible while LRM recalculates
         let hasInitialZoom = false; // Track if initial zoom has been done
         let locationWatchId = null; // Track GPS watch ID for cleanup
 
@@ -147,7 +148,7 @@
         let isPrimary = {{ ($responderAssignment && $responderAssignment->role === 'primary') ? 'true' : 'false' }};
         
         // Test mode variables
-        let testFlag = false; // Set to true to enable test mode
+        let testFlag = true; // Set to true to enable test mode
         let testInterval = null;
         let testRouteCoordinates = [];
         let testCurrentIndex = 0;
@@ -1058,6 +1059,12 @@
                 responderMap.removeControl(routeControl);
                 routeControl = null;
             }
+
+            // Remove persistent route polyline
+            if (routePolyline) {
+                responderMap.removeLayer(routePolyline);
+                routePolyline = null;
+            }
         }
         
         // Cleanup on page unload
@@ -1108,14 +1115,14 @@
 
             // Rotate map based on responder's heading so responder always points to top
             // Invert bearing so direction of travel points "up" instead of "down"
-            if (!isNaN(heading) && heading !== null && heading !== undefined) {
-                const mapBearing = (360 - heading) % 360;
-                try {
-                    responderMap.setBearing(mapBearing);
-                } catch (e) {
-                    console.log('Rotation not available:', e);
-                }
-            }
+            // if (!isNaN(heading) && heading !== null && heading !== undefined) {
+            //     const mapBearing = (360 - heading) % 360;
+            //     try {
+            //         responderMap.setBearing(mapBearing);
+            //     } catch (e) {
+            //         console.log('Rotation not available:', e);
+            //     }
+            // }
 
             // Center map on responder location
             responderMap.panTo([latitude, longitude], { 
@@ -1134,14 +1141,14 @@
             if (!responderMarker) {
                 // Set initial bearing BEFORE creating marker for proper rotation
                 // Use responder's heading so responder points to top
-                if (!isNaN(heading) && heading !== null && heading !== undefined) {
-                    const initialMapBearing = (360 - heading) % 360;
-                    try {
-                        responderMap.setBearing(initialMapBearing);
-                    } catch (e) {
-                        console.log('Initial rotation not available:', e);
-                    }
-                }
+                // if (!isNaN(heading) && heading !== null && heading !== undefined) {
+                //     const initialMapBearing = (360 - heading) % 360;
+                //     try {
+                //         responderMap.setBearing(initialMapBearing);
+                //     } catch (e) {
+                //         console.log('Initial rotation not available:', e);
+                //     }
+                // }
 
                 const responderIcon = L.divIcon({
                     html: `
@@ -1175,6 +1182,7 @@
                             {
                                 color: severityColors[report.severity_level] ?? "#007bff",
                                 weight: 5,
+                                opacity: 0, // Hidden — persistent routePolyline handles the visible line
                             },
                         ],
                     },
@@ -1224,6 +1232,21 @@
                     const route = e.routes[0];
                     const summary = route.summary;
                     const message = `Responding to: ${report.type}, ${report.address || "Unknown"}`;
+
+                    // Draw/update the persistent polyline so the route is always visible,
+                    // even while LRM recalculates due to position updates
+                    const routeCoords = route.coordinates;
+                    if (routeCoords && routeCoords.length > 0) {
+                        if (!routePolyline) {
+                            routePolyline = L.polyline(routeCoords, {
+                                color: severityColors[report.severity_level] ?? "#007bff",
+                                weight: 5,
+                                opacity: 0.9,
+                            }).addTo(responderMap);
+                        } else {
+                            routePolyline.setLatLngs(routeCoords);
+                        }
+                    }
 
                     // Store route coordinates for test mode
                     if (testFlag) {
