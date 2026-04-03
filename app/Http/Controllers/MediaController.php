@@ -38,6 +38,13 @@ class MediaController extends Controller
 
             foreach ($request->file('files', []) as $file) {
 
+                if (!$file->isValid()) {
+                    return response()->json([
+                        'status' => 'error',
+                        'message' => 'File upload error. PHP error code: ' . $file->getError()
+                    ], 400);
+                }
+
                 $allowedMimes = [
                     'image/jpeg', 'image/jpg', 'image/png', 'image/gif',
                     'video/mp4', 'video/avi', 'video/quicktime', 'video/x-msvideo'
