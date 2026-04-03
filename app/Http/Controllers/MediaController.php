@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\EmergencyReport;
 use App\Models\EmergencyReportMedia;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\Auth;
 use Intervention\Image\ImageManager;
 use Intervention\Image\Drivers\Gd\Driver;
@@ -15,16 +16,21 @@ class MediaController extends Controller
     {
         try {
             $report = EmergencyReport::findOrFail($reportId);
+            
+            // Allow all authenticated users (user, responder, admin, super admin) to upload
+            // No additional permission check needed as route is already protected by auth middleware
 
+            // Validate files with custom error messages - Only images and videos allowed
             $validated = $request->validate([
-                'files.*' => 'required|file|mimes:jpeg,jpg,png,gif,mp4,avi,mov|max:10240',
+                'files.*' => 'required|file|mimes:jpeg,jpg,png,gif,mp4,avi,mov|max:10240', // 10MB max
             ], [
                 'files.*.required' => 'File is required',
                 'files.*.file' => 'Invalid file',
-                'files.*.mimes' => 'Invalid file type. Only images and videos are allowed.',
+                'files.*.mimes' => 'Invalid file type. Only images (jpeg, jpg, png, gif) and videos (mp4, avi, mov) are allowed.',
                 'files.*.max' => 'File size exceeds maximum limit of 10MB',
             ]);
 
+            // Additional validation: Check if files array exists and is not empty
             if (!$request->hasFile('files') || count($request->file('files')) === 0) {
                 return response()->json([
                     'status' => 'error',
@@ -36,54 +42,48 @@ class MediaController extends Controller
             $uploadedFiles = [];
             $invalidFiles = [];
 
-            foreach ($request->file('files', []) as $file) {
-
-                if (!$file->isValid()) {
-                    return response()->json([
-                        'status' => 'error',
-                        'message' => 'File upload error. PHP error code: ' . $file->getError()
-                    ], 400);
-                }
-
+            foreach ($request->file('files', []) as $index => $file) {
+                // Additional file type validation - Only images and videos allowed
                 $allowedMimes = [
-                    'image/jpeg', 'image/jpg', 'image/png', 'image/gif',
-                    'video/mp4', 'video/avi', 'video/quicktime', 'video/x-msvideo'
+                    // Images
+                    'image/jpeg', 
+                    'image/jpg', 
+                    'image/png', 
+                    'image/gif',
+                    // Videos
+                    'video/mp4', 
+                    'video/avi', 
+                    'video/quicktime',
+                    'video/x-msvideo' // AVI alternative MIME type
                 ];
-
+                
                 if (!in_array($file->getMimeType(), $allowedMimes)) {
                     $invalidFiles[] = [
                         'file' => $file->getClientOriginalName(),
                         'type' => $file->getMimeType(),
-                        'message' => 'Invalid file type.'
+                        'message' => 'Invalid file type. Only pictures (images) and videos are allowed.'
                     ];
                     continue;
                 }
-
                 $fileType = $this->getFileType($file->getMimeType());
                 $storagePath = "emergency-reports";
                 $fileName = uniqid() . '_' . time() . '.' . $file->getClientOriginalExtension();
-
-                $destinationPath = public_path('storage/' . $storagePath);
-
-                if (!file_exists($destinationPath)) {
-                    mkdir($destinationPath, 0777, true);
-                }
-
-                // ✅ Move file FIRST (safe, permanent)
-                $file->move($destinationPath, $fileName);
-
-                $filePath = 'storage/' . $storagePath . '/' . $fileName;
-
+                
+                $filePath = $file->storeAs($storagePath, $fileName, 'public');
                 $thumbnailPath = null;
 
-                // ✅ Generate thumbnail from SAVED file (not temp)
-                if ($fileType === 'image') {
-                    $thumbnailPath = $this->generateThumbnailFromSaved($filePath, $storagePath);
+                // Generate thumbnail for images
+                if (in_array($fileType, ['image'])) {
+                    try {
+                        $thumbnailPath = $this->generateThumbnail($file, $storagePath);
+                    } catch (\Exception $e) {
+                        // Continue without thumbnail if generation fails
+                    }
                 }
 
                 $media = EmergencyReportMedia::create([
                     'emergency_report_id' => $reportId,
-                    'user_id' => Auth::id(),
+                    'user_id' => Auth::id(), // Track who uploaded the file
                     'file_path' => $filePath,
                     'file_type' => $fileType,
                     'mime_type' => $file->getMimeType(),
@@ -93,25 +93,34 @@ class MediaController extends Controller
 
                 $uploadedFiles[] = [
                     'id' => $media->id,
-                    'url' => asset($filePath),
-                    'thumbnail_url' => $thumbnailPath ? asset($thumbnailPath) : null,
+                    'url' => $media->url,
+                    'thumbnail_url' => $media->thumbnail_url,
                     'file_type' => $fileType,
                 ];
             }
 
+            // If there are invalid files, return error
             if (count($invalidFiles) > 0) {
+                $errorMessages = array_map(function($item) {
+                    return $item['file'] . ': ' . $item['message'];
+                }, $invalidFiles);
+                
                 return response()->json([
                     'status' => 'error',
                     'message' => 'Some files are invalid',
-                    'errors' => ['files' => array_column($invalidFiles, 'message')],
+                    'errors' => [
+                        'files' => $errorMessages
+                    ],
                     'invalid_files' => $invalidFiles
                 ], 422);
             }
 
+            // If no files were uploaded successfully
             if (count($uploadedFiles) === 0) {
                 return response()->json([
                     'status' => 'error',
-                    'message' => 'No valid files uploaded',
+                    'message' => 'No valid files were uploaded',
+                    'errors' => ['files' => ['Please upload valid files only.']]
                 ], 422);
             }
 
@@ -120,11 +129,16 @@ class MediaController extends Controller
                 'message' => 'Files uploaded successfully',
                 'media' => $uploadedFiles,
             ]);
-
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Validation failed',
+                'errors' => $e->errors()
+            ], 422);
         } catch (\Exception $e) {
             return response()->json([
                 'status' => 'error',
-                'message' => 'Upload failed: ' . $e->getMessage()
+                'message' => 'Error uploading files: ' . $e->getMessage()
             ], 500);
         }
     }
@@ -132,16 +146,19 @@ class MediaController extends Controller
     public function index($reportId)
     {
         $report = EmergencyReport::findOrFail($reportId);
+        
+        // Allow all authenticated users to view media
+        // No additional permission check needed as route is already protected by auth middleware
 
         $media = $report->media()->get()->map(function ($item) {
             return [
                 'id' => $item->id,
-                'url' => asset($item->file_path),
-                'thumbnail_url' => $item->thumbnail_path ? asset($item->thumbnail_path) : null,
+                'url' => $item->url,
+                'thumbnail_url' => $item->thumbnail_url,
                 'file_type' => $item->file_type,
                 'mime_type' => $item->mime_type,
                 'description' => $item->description,
-                'user_id' => $item->user_id,
+                'user_id' => $item->user_id, // Include uploader's user_id
             ];
         });
 
@@ -154,76 +171,65 @@ class MediaController extends Controller
     public function destroy($mediaId)
     {
         $media = EmergencyReportMedia::findOrFail($mediaId);
-
+        
+        // Allow the user who uploaded the file OR admins/super admins to delete it
         $isUploader = $media->user_id === Auth::id();
         $isAdmin = Auth::user()->isAdmin();
-
+        
         if (!$isUploader && !$isAdmin) {
             return response()->json([
-                'status' => 'error',
-                'message' => 'Unauthorized'
+                'status' => 'error', 
+                'message' => 'You can only delete files that you uploaded.'
             ], 403);
         }
 
-        // ✅ DELETE FILE
-        $fileFullPath = public_path($media->file_path);
-        if (file_exists($fileFullPath)) {
-            unlink($fileFullPath);
+        // Delete files
+        if (Storage::disk('public')->exists($media->file_path)) {
+            Storage::disk('public')->delete($media->file_path);
         }
-
-        // ✅ DELETE THUMBNAIL
-        if ($media->thumbnail_path) {
-            $thumbFullPath = public_path($media->thumbnail_path);
-            if (file_exists($thumbFullPath)) {
-                unlink($thumbFullPath);
-            }
+        if ($media->thumbnail_path && Storage::disk('public')->exists($media->thumbnail_path)) {
+            Storage::disk('public')->delete($media->thumbnail_path);
         }
 
         $media->delete();
 
         return response()->json([
             'status' => 'success',
-            'message' => 'Deleted successfully',
+            'message' => 'Media deleted successfully',
         ]);
     }
 
     private function getFileType($mimeType)
     {
-        if (str_starts_with($mimeType, 'image/')) return 'image';
-        if (str_starts_with($mimeType, 'video/')) return 'video';
-        return 'document';
+        if (str_starts_with($mimeType, 'image/')) {
+            return 'image';
+        } elseif (str_starts_with($mimeType, 'video/')) {
+            return 'video';
+        } elseif (str_starts_with($mimeType, 'audio/')) {
+            return 'audio';
+        } else {
+            return 'document';
+        }
     }
 
-    private function generateThumbnailFromSaved($filePath, $storagePath)
+    private function generateThumbnail($file, $storagePath)
     {
         try {
             $manager = new ImageManager(new Driver());
-
-            // ✅ Read from PUBLIC FILE (not /tmp)
-            $fullPath = public_path($filePath);
-
-            if (!file_exists($fullPath)) {
-                return null;
-            }
-
-            $image = $manager->read($fullPath);
+            $image = $manager->read($file);
             $image->scale(width: 300, height: 300);
-
-            $thumbnailName = 'thumb_' . uniqid() . '.jpg';
-            $destinationPath = public_path('storage/' . $storagePath);
-
-            if (!file_exists($destinationPath)) {
-                mkdir($destinationPath, 0777, true);
-            }
-
-            $thumbnailFullPath = $destinationPath . '/' . $thumbnailName;
-
-            $image->toJpeg(80)->save($thumbnailFullPath);
-
-            return 'storage/' . $storagePath . '/' . $thumbnailName;
-
+            
+            $thumbnailName = 'thumb_' . uniqid() . '_' . time() . '.jpg';
+            $thumbnailPath = $storagePath . '/' . $thumbnailName;
+            
+            $encoded = $image->toJpeg(80);
+            Storage::disk('public')->put($thumbnailPath, $encoded);
+            
+            return $thumbnailPath;
         } catch (\Exception $e) {
+            // Return null if thumbnail generation fails
             return null;
         }
     }
 }
+
