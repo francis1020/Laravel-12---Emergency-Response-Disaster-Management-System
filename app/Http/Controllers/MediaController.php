@@ -56,16 +56,22 @@ class MediaController extends Controller
                 $storagePath = "emergency-reports";
                 $fileName = uniqid() . '_' . time() . '.' . $file->getClientOriginalExtension();
 
-                // ✅ SAVE DIRECTLY TO PUBLIC FOLDER
                 $destinationPath = public_path('storage/' . $storagePath);
 
                 if (!file_exists($destinationPath)) {
                     mkdir($destinationPath, 0777, true);
                 }
 
+                $thumbnailPath = null;
+
+                // ✅ Generate thumbnail FIRST (while temp file still exists)
+                if ($fileType === 'image') {
+                    $thumbnailPath = $this->generateThumbnailFromTemp($file, $storagePath);
+                }
+
+                // ✅ THEN move file
                 $file->move($destinationPath, $fileName);
 
-                // Save relative path
                 $filePath = 'storage/' . $storagePath . '/' . $fileName;
 
                 $thumbnailPath = null;
@@ -204,6 +210,34 @@ class MediaController extends Controller
             }
 
             $thumbnailFullPath = $destinationPath . '/' . $thumbnailName;
+            $image->toJpeg(80)->save($thumbnailFullPath);
+
+            return 'storage/' . $storagePath . '/' . $thumbnailName;
+
+        } catch (\Exception $e) {
+            return null;
+        }
+    }
+
+    private function generateThumbnailFromTemp($file, $storagePath)
+    {
+        try {
+            $manager = new ImageManager(new Driver());
+
+            // Read from TEMP file (important)
+            $image = $manager->read($file->getRealPath());
+            $image->scale(width: 300, height: 300);
+
+            $thumbnailName = 'thumb_' . uniqid() . '.jpg';
+
+            $destinationPath = public_path('storage/' . $storagePath);
+
+            if (!file_exists($destinationPath)) {
+                mkdir($destinationPath, 0777, true);
+            }
+
+            $thumbnailFullPath = $destinationPath . '/' . $thumbnailName;
+
             $image->toJpeg(80)->save($thumbnailFullPath);
 
             return 'storage/' . $storagePath . '/' . $thumbnailName;
