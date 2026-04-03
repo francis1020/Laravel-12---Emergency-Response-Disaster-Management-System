@@ -609,9 +609,33 @@ textarea.form-control {
         font-size: 14px !important;
     }
 
+
+    .legend-list {
+        width: 10px !important;
+        height: 10px !important;
+        margin-right: 8px !important;
+    }
+
     .map-legend {
+        padding: 8px 12px !important;
         font-size: 10px !important;
-        width: 220px;
+        width: 180px !important;
+    }
+
+    .map-legend h4 {
+        font-size: 14px !important;
+    }
+
+    .map-legend h6 {
+        font-size: 12px !important;
+    }
+
+    .floating-icon {
+        width: 50px !important;
+        height: 50px !important;
+        font-size: 20px !important;
+        right: 10px !important;
+        bottom: 10px !important;
     }
 
     .dropdown-menu-lg-end {
