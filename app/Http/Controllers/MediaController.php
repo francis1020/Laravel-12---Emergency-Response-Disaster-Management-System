@@ -69,7 +69,7 @@ class MediaController extends Controller
                 $storagePath = "emergency-reports/{$reportId}";
                 $fileName = uniqid() . '_' . time() . '.' . $file->getClientOriginalExtension();
                 
-                $filePath = $file->storeAs($storagePath, $fileName, 'public');
+                $filePath = $file->storeAs($storagePath, $fileName, 'b2');
                 $thumbnailPath = null;
 
                 // Generate thumbnail for images
@@ -149,12 +149,27 @@ class MediaController extends Controller
         
         // Allow all authenticated users to view media
         // No additional permission check needed as route is already protected by auth middleware
-
         $media = $report->media()->get()->map(function ($item) {
+
+            $disk = Storage::disk('b2');
+
+            $b2FilePathUrl = $item->url;
+            $b2ThumbnailUrl = $item->thumbnail_url ? $item->thumbnail_url : $item->url;
+
+            // if b2FilePathUrl exist {
+            if ($disk->exists($item->file_path)) {
+                $b2FilePathUrl = $disk->temporaryUrl(
+                    $item->file_path,
+                    now()->addMinutes(10) // valid for 10 minutes
+                );
+
+                $b2ThumbnailUrl = $b2FilePathUrl; 
+            }
+
             return [
                 'id' => $item->id,
-                'url' => $item->url,
-                'thumbnail_url' => $item->thumbnail_url,
+                'url' => $b2FilePathUrl,
+                'thumbnail_url' => $b2FilePathUrl,
                 'file_type' => $item->file_type,
                 'mime_type' => $item->mime_type,
                 'description' => $item->description,
