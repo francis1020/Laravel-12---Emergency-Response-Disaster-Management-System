@@ -62,22 +62,16 @@ class MediaController extends Controller
                     mkdir($destinationPath, 0777, true);
                 }
 
-                $thumbnailPath = null;
-
-                // ✅ Generate thumbnail FIRST (while temp file still exists)
-                if ($fileType === 'image') {
-                    $thumbnailPath = $this->generateThumbnailFromTemp($file, $storagePath);
-                }
-
-                // ✅ THEN move file
+                // ✅ Move file FIRST (safe, permanent)
                 $file->move($destinationPath, $fileName);
 
                 $filePath = 'storage/' . $storagePath . '/' . $fileName;
 
                 $thumbnailPath = null;
 
+                // ✅ Generate thumbnail from SAVED file (not temp)
                 if ($fileType === 'image') {
-                    $thumbnailPath = $this->generateThumbnail($filePath, $storagePath);
+                    $thumbnailPath = $this->generateThumbnailFromSaved($filePath, $storagePath);
                 }
 
                 $media = EmergencyReportMedia::create([
@@ -193,43 +187,22 @@ class MediaController extends Controller
         return 'document';
     }
 
-    private function generateThumbnail($filePath, $storagePath)
+    private function generateThumbnailFromSaved($filePath, $storagePath)
     {
         try {
             $manager = new ImageManager(new Driver());
 
+            // ✅ Read from PUBLIC FILE (not /tmp)
             $fullPath = public_path($filePath);
+
+            if (!file_exists($fullPath)) {
+                return null;
+            }
+
             $image = $manager->read($fullPath);
             $image->scale(width: 300, height: 300);
 
             $thumbnailName = 'thumb_' . uniqid() . '.jpg';
-            $destinationPath = public_path('storage/' . $storagePath);
-
-            if (!file_exists($destinationPath)) {
-                mkdir($destinationPath, 0777, true);
-            }
-
-            $thumbnailFullPath = $destinationPath . '/' . $thumbnailName;
-            $image->toJpeg(80)->save($thumbnailFullPath);
-
-            return 'storage/' . $storagePath . '/' . $thumbnailName;
-
-        } catch (\Exception $e) {
-            return null;
-        }
-    }
-
-    private function generateThumbnailFromTemp($file, $storagePath)
-    {
-        try {
-            $manager = new ImageManager(new Driver());
-
-            // Read from TEMP file (important)
-            $image = $manager->read($file->getRealPath());
-            $image->scale(width: 300, height: 300);
-
-            $thumbnailName = 'thumb_' . uniqid() . '.jpg';
-
             $destinationPath = public_path('storage/' . $storagePath);
 
             if (!file_exists($destinationPath)) {
