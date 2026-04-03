@@ -93,8 +93,8 @@ class MediaController extends Controller
 
                 $uploadedFiles[] = [
                     'id' => $media->id,
-                    'url' => $media->url,
-                    'thumbnail_url' => $media->thumbnail_url,
+                    'url' => Storage::disk('public')->url($media->file_path),
+                    'thumbnail_url' => $media->thumbnail_path ? Storage::disk('public')->url($media->thumbnail_path) : null,
                     'file_type' => $fileType,
                 ];
             }
@@ -216,18 +216,21 @@ class MediaController extends Controller
     {
         try {
             $manager = new ImageManager(new Driver());
-            $image = $manager->read($file);
-            $image->scale(width: 300, height: 300);
-            
+            $image = $manager->make($file);
+
+            // Resize proportionally to max 300x300
+            $image->fit(300, 300, function ($constraint) {
+                $constraint->upsize();
+            });
+
             $thumbnailName = 'thumb_' . uniqid() . '_' . time() . '.jpg';
             $thumbnailPath = $storagePath . '/' . $thumbnailName;
-            
-            $encoded = $image->toJpeg(80);
-            Storage::disk('public')->put($thumbnailPath, $encoded);
-            
+
+            // Save to public disk
+            Storage::disk('public')->put($thumbnailPath, (string) $image->encode('jpg', 80));
+
             return $thumbnailPath;
         } catch (\Exception $e) {
-            // Return null if thumbnail generation fails
             return null;
         }
     }
