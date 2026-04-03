@@ -9,7 +9,6 @@ use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\Auth;
 use Intervention\Image\ImageManager;
 use Intervention\Image\Drivers\Gd\Driver;
-use Intervention\Image\Facades\Image;
 
 class MediaController extends Controller
 {
@@ -67,20 +66,20 @@ class MediaController extends Controller
                     continue;
                 }
                 $fileType = $this->getFileType($file->getMimeType());
-                $storagePath = "emergency-reports";
+                $storagePath = "emergency-reports/{$reportId}";
                 $fileName = uniqid() . '_' . time() . '.' . $file->getClientOriginalExtension();
                 
                 $filePath = $file->storeAs($storagePath, $fileName, 'public');
                 $thumbnailPath = null;
 
                 // Generate thumbnail for images
-                // if (in_array($fileType, ['image'])) {
-                //     try {
-                //         $thumbnailPath = $this->generateThumbnail($file, $storagePath);
-                //     } catch (\Exception $e) {
-                //         // Continue without thumbnail if generation fails
-                //     }
-                // }
+                if (in_array($fileType, ['image'])) {
+                    try {
+                        $thumbnailPath = $this->generateThumbnail($file, $storagePath);
+                    } catch (\Exception $e) {
+                        // Continue without thumbnail if generation fails
+                    }
+                }
 
                 $media = EmergencyReportMedia::create([
                     'emergency_report_id' => $reportId,
@@ -89,13 +88,13 @@ class MediaController extends Controller
                     'file_type' => $fileType,
                     'mime_type' => $file->getMimeType(),
                     'file_size' => $file->getSize(),
-                    'thumbnail_path' => $thumbnailPath ?? null,
+                    'thumbnail_path' => $thumbnailPath,
                 ]);
 
                 $uploadedFiles[] = [
                     'id' => $media->id,
-                    'url' => Storage::disk('public')->url($media->file_path),
-                    'thumbnail_url' => $media->thumbnail_path ? Storage::disk('public')->url($media->thumbnail_path) : null,
+                    'url' => $media->url,
+                    'thumbnail_url' => $media->thumbnail_url,
                     'file_type' => $fileType,
                 ];
             }
@@ -213,27 +212,24 @@ class MediaController extends Controller
         }
     }
 
-    // private function generateThumbnail($file, $storagePath)
-    // {
-    //     try {
-    //         // Create image instance using the facade
-    //         $image = Image::make($file);
-
-    //         // Resize proportionally to max 300x300
-    //         $image->fit(300, 300, function ($constraint) {
-    //             $constraint->upsize();
-    //         });
-
-    //         $thumbnailName = 'thumb_' . uniqid() . '_' . time() . '.jpg';
-    //         $thumbnailPath = $storagePath . '/' . $thumbnailName;
-
-    //         // Save to public disk
-    //         Storage::disk('public')->put($thumbnailPath, (string) $image->encode('jpg', 80));
-
-    //         return $thumbnailPath;
-    //     } catch (\Exception $e) {
-    //         return null;
-    //     }
-    // }
+    private function generateThumbnail($file, $storagePath)
+    {
+        try {
+            $manager = new ImageManager(new Driver());
+            $image = $manager->read($file);
+            $image->scale(width: 300, height: 300);
+            
+            $thumbnailName = 'thumb_' . uniqid() . '_' . time() . '.jpg';
+            $thumbnailPath = $storagePath . '/' . $thumbnailName;
+            
+            $encoded = $image->toJpeg(80);
+            Storage::disk('public')->put($thumbnailPath, $encoded);
+            
+            return $thumbnailPath;
+        } catch (\Exception $e) {
+            // Return null if thumbnail generation fails
+            return null;
+        }
+    }
 }
 
