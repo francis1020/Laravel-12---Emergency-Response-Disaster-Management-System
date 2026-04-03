@@ -137,15 +137,47 @@
         // event listener above can distinguish them from user gestures.
         let _autoRotating = false;
 
+        // Smooth rotation state
+        let _currentBearing = 0;
+        let _targetBearing  = 0;
+        let _rotationAnimFrame = null;
+
+        // Returns the shortest signed delta between two angles (range -180 … 180).
+        function _shortestAngleDelta(from, to) {
+            return ((to - from) + 540) % 360 - 180;
+        }
+
+        // Lerp-based animation loop – moves 14 % of the remaining gap each frame,
+        // producing a natural ease-out feel without a fixed duration.
+        function _animateRotation(map) {
+            const delta = _shortestAngleDelta(_currentBearing, _targetBearing);
+
+            if (Math.abs(delta) < 0.15) {
+                // Close enough – snap to target and stop.
+                _currentBearing = ((_targetBearing % 360) + 360) % 360;
+                _autoRotating = true;
+                try { map.setBearing(_currentBearing); } catch (_) {}
+                _autoRotating = false;
+                _rotationAnimFrame = null;
+                return;
+            }
+
+            _currentBearing = ((_currentBearing + delta * 0.14) % 360 + 360) % 360;
+            _autoRotating = true;
+            try { map.setBearing(_currentBearing); } catch (_) {}
+            _autoRotating = false;
+
+            _rotationAnimFrame = requestAnimationFrame(() => _animateRotation(map));
+        }
+
         function setAutoBearing(map, bearing) {
             if (userManualRotate) return; // skip while user is in control
-            _autoRotating = true;
-            try {
-                map.setBearing(bearing);
-            } catch (e) {
-                console.log('Rotation not available:', e);
+            _targetBearing = ((bearing % 360) + 360) % 360;
+
+            // Kick off the animation loop only if it isn't already running.
+            if (!_rotationAnimFrame) {
+                _rotationAnimFrame = requestAnimationFrame(() => _animateRotation(map));
             }
-            _autoRotating = false;
         }
         
         // Function to stop location tracking
