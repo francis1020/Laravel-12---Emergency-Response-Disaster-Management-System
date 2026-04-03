@@ -189,8 +189,8 @@ function openReportModal(report) {
 		}
 		
 		// Check if user is assigned as responder (primary or secondary)
-		checkIfSecondaryResponder(report.id, userId, function(isAssigned, isPrimary) {
-			if (isAssigned) {
+		checkIfSecondaryResponder(report.id, userId, function(isAssigned, isPrimary, isCompleted) {
+			if (isAssigned && !isCompleted) {
 				respondBtn.textContent = isPrimary ? "Continue Response" : "Continue as Secondary Responder";
 				respondBtn.classList.remove('btn-secondary');
 				respondBtn.classList.add(isPrimary ? 'btn-success' : 'btn-info');
@@ -199,6 +199,16 @@ function openReportModal(report) {
 				respondBtn.onclick = null;
 				$('#reportModalFooter').show();
 			} else {
+
+				if (isCompleted) {
+					// goto the response page
+					respondBtn.textContent = "Go to report details";
+					respondBtn.href = `/reports/${report.id}`;
+					respondBtn.disabled = false;
+					$('#reportModalFooter').show();
+					return;
+				}
+
 				// Check if there's a primary responder
 				checkIfHasPrimaryResponder(report.id, function(hasPrimary) {
 					if (hasPrimary) {
@@ -639,18 +649,27 @@ function openReportModal(report) {
 			.then(data => {
 				if (data.status === 'success' && data.responders) {
 					const assignment = data.responders.find(r => r.responder_id === userId);
+
+					if (assignment.status === "completed") {
+						callback(true, false, true);
+						return;
+					}
+
 					if (assignment) {
 						callback(true, assignment.role === 'primary');
 					} else {
 						callback(false, false);
+						return;
 					}
 				} else {
 					callback(false, false);
+					return;
 				}
 			})
 			.catch(error => {
 				console.error('Error checking responder assignment:', error);
 				callback(false, false);
+				return;
 			});
 	}
 	
