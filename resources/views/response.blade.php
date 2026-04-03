@@ -971,7 +971,7 @@
 
             // Center map on responder location
             // Amount of vertical offset in pixels (how far from the bottom)
-            const yOffset = 300; // adjust as needed
+            const yOffset = 200; // adjust as needed
 
             // Convert the responder's lat/lng to pixel coordinates
             const point = responderMap.latLngToContainerPoint([latitude, longitude]);
