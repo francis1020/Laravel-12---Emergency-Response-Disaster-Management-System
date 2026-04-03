@@ -115,6 +115,38 @@
 
         let lastHeading = 0;
         let lastPosition = null;
+
+        // Auto-rotate pause logic: when the user manually rotates the map,
+        // pause automatic bearing updates for 5 seconds then resume.
+        let userManualRotate = false;
+        let manualRotateTimer = null;
+
+        responderMap.on('rotate', function () {
+            // Only treat it as manual if it wasn't triggered by our own setBearing call
+            if (!_autoRotating) {
+                userManualRotate = true;
+                if (manualRotateTimer) clearTimeout(manualRotateTimer);
+                manualRotateTimer = setTimeout(function () {
+                    userManualRotate = false;
+                    manualRotateTimer = null;
+                }, 5000);
+            }
+        });
+
+        // Internal flag set around programmatic setBearing calls so the rotate
+        // event listener above can distinguish them from user gestures.
+        let _autoRotating = false;
+
+        function setAutoBearing(map, bearing) {
+            if (userManualRotate) return; // skip while user is in control
+            _autoRotating = true;
+            try {
+                map.setBearing(bearing);
+            } catch (e) {
+                console.log('Rotation not available:', e);
+            }
+            _autoRotating = false;
+        }
         
         // Function to stop location tracking
         function stopLocationTracking() {
@@ -960,14 +992,10 @@
 
             // Rotate map based on responder's heading so responder always points to top
             // Invert bearing so direction of travel points "up" instead of "down"
-            // if (!isNaN(heading) && heading !== null && heading !== undefined) {
-            //     const mapBearing = (360 - heading) % 360;
-            //     try {
-            //         responderMap.setBearing(mapBearing);
-            //     } catch (e) {
-            //         console.log('Rotation not available:', e);
-            //     }
-            // }
+            if (!isNaN(heading) && heading !== null && heading !== undefined) {
+                const mapBearing = (360 - heading) % 360;
+                setAutoBearing(responderMap, mapBearing);
+            }
 
             // Center map on responder location
             // Amount of vertical offset in pixels (how far from the bottom)
@@ -996,14 +1024,10 @@
             if (!responderMarker) {
                 // Set initial bearing BEFORE creating marker for proper rotation
                 // Use responder's heading so responder points to top
-                // if (!isNaN(heading) && heading !== null && heading !== undefined) {
-                //     const initialMapBearing = (360 - heading) % 360;
-                //     try {
-                //         responderMap.setBearing(initialMapBearing);
-                //     } catch (e) {
-                //         console.log('Initial rotation not available:', e);
-                //     }
-                // }
+                if (!isNaN(heading) && heading !== null && heading !== undefined) {
+                    const initialMapBearing = (360 - heading) % 360;
+                    setAutoBearing(responderMap, initialMapBearing);
+                }
 
                 const responderIcon = L.divIcon({
                     html: `
