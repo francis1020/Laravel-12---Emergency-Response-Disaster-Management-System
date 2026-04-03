@@ -173,6 +173,24 @@
             }
         }
 
+        function getCsrfToken() {
+            return document.querySelector('meta[name="csrf-token"]').getAttribute('content');
+        }
+
+        async function postFormData(url, data) {
+            const params = new URLSearchParams({ ...data, _token: getCsrfToken() });
+            const response = await fetch(url, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                body: params,
+            });
+            const json = await response.json();
+            if (!response.ok) {
+                throw new Error(json.message || `HTTP error ${response.status}`);
+            }
+            return json;
+        }
+
         document.addEventListener('DOMContentLoaded', function () {
             if (responderStatus === 'en_route' || responderStatus === 'on_scene') {
                 responderLocation();
@@ -187,231 +205,187 @@
             // Initialize cancel button visibility on page load
             updateCancelButtonVisibility();
 
-            responseBtn.addEventListener('click', function () {
+            responseBtn.addEventListener('click', async function () {
                 if (responderStatus && responderStatus !== 'null' && responderStatus !== 'cancelled') {
                     Swal.fire({
                         icon: 'info',
                         title: 'Info',
                         text: 'You have already responded to this report.',
                         buttonsStyling: false,
-                        customClass: {
-                            confirmButton: 'btn btn-info'
-                        }
+                        customClass: { confirmButton: 'btn btn-info' },
                     });
                     return;
                 }
-                
-                // Check if report has a primary responder
-                fetch(`/reports/{{ $report->id }}/responders`)
-                    .then(response => response.json())
-                    .then(data => {
-                        const hasPrimaryResponder = data.status === 'success' && data.responders && 
-                            data.responders.some(r => r.role === 'primary');
-                        
-                        // If no primary responder exists, this responder will become primary
-                        const willBePrimary = !hasPrimaryResponder;
-                        
-                        // Store willBePrimary in a variable accessible to the success handler
-                        window.willBePrimaryAfterResponse = willBePrimary;
-                        
-                        // Build HTML content
-                        let htmlContent = `
-                            <p>You are about to respond to this emergency report.</p>
-                            <textarea id="responseNotes" class="swal2-textarea" placeholder="Enter response notes..."></textarea>
-                        `;
-                        
-                        // Add checkbox warning if responder will become primary
-                        if (willBePrimary) {
-                            htmlContent += `
-                                <div class="alert alert-warning mt-3 mb-0" role="alert">
-                                    <strong>Important:</strong> You will be assigned as the <strong>Primary Responder</strong> for this report.
-                                    <div class="form-check mt-2">
-                                        <input class="form-check-input" type="checkbox" id="acknowledgePrimary" style="cursor: pointer;">
-                                        <label class="form-check-label" for="acknowledgePrimary" style="cursor: pointer;">
-                                            I understand that primary responders cannot cancel their response
-                                        </label>
-                                    </div>
+
+                try {
+                    const checkResponse = await fetch(`/reports/{{ $report->id }}/responders`);
+                    const checkData = await checkResponse.json();
+
+                    const hasPrimaryResponder = checkData.status === 'success' && checkData.responders &&
+                        checkData.responders.some(r => r.role === 'primary');
+                    const willBePrimary = !hasPrimaryResponder;
+                    window.willBePrimaryAfterResponse = willBePrimary;
+
+                    let htmlContent = `
+                        <p>You are about to respond to this emergency report.</p>
+                        <textarea id="responseNotes" class="swal2-textarea" placeholder="Enter response notes..."></textarea>
+                    `;
+
+                    if (willBePrimary) {
+                        htmlContent += `
+                            <div class="alert alert-warning mt-3 mb-0" role="alert">
+                                <strong>Important:</strong> You will be assigned as the <strong>Primary Responder</strong> for this report.
+                                <div class="form-check mt-2">
+                                    <input class="form-check-input" type="checkbox" id="acknowledgePrimary" style="cursor: pointer;">
+                                    <label class="form-check-label" for="acknowledgePrimary" style="cursor: pointer;">
+                                        I understand that primary responders cannot cancel their response
+                                    </label>
                                 </div>
-                            `;
-                        }
-                        
-                        Swal.fire({
-                            title: 'Respond to this report?',
-                            html: htmlContent,
-                            icon: 'warning',
-                            showCancelButton: true,
-                            confirmButtonText: 'Respond',
-                            cancelButtonText: 'Close',
-                            buttonsStyling: false,
-                            customClass: {
-                                confirmButton: 'btn btn-success',
-                                cancelButton: 'btn btn-secondary',
-                                popup: 'text-start'
-                            },
-                            reverseButtons: true,
-                            didOpen: () => {
-                                // If checkbox exists, disable confirm button until checked
+                            </div>
+                        `;
+                    }
+
+                    const result = await Swal.fire({
+                        title: 'Respond to this report?',
+                        html: htmlContent,
+                        icon: 'warning',
+                        showCancelButton: true,
+                        confirmButtonText: 'Respond',
+                        cancelButtonText: 'Close',
+                        buttonsStyling: false,
+                        customClass: {
+                            confirmButton: 'btn btn-success',
+                            cancelButton: 'btn btn-secondary',
+                            popup: 'text-start',
+                        },
+                        reverseButtons: true,
+                        didOpen: () => {
+                            const checkbox = document.getElementById('acknowledgePrimary');
+                            if (checkbox) {
+                                const confirmBtn = Swal.getConfirmButton();
+                                confirmBtn.disabled = true;
+                                confirmBtn.style.opacity = '0.5';
+                                confirmBtn.style.cursor = 'not-allowed';
+
+                                checkbox.addEventListener('change', function () {
+                                    if (this.checked) {
+                                        confirmBtn.disabled = false;
+                                        confirmBtn.style.opacity = '1';
+                                        confirmBtn.style.cursor = 'pointer';
+                                    } else {
+                                        confirmBtn.disabled = true;
+                                        confirmBtn.style.opacity = '0.5';
+                                        confirmBtn.style.cursor = 'not-allowed';
+                                    }
+                                });
+                            }
+                        },
+                        preConfirm: () => {
+                            const notes = document.getElementById('responseNotes').value.trim();
+                            if (!notes) {
+                                Swal.showValidationMessage('Please enter your response notes.');
+                                return false;
+                            }
+                            if (willBePrimary) {
                                 const checkbox = document.getElementById('acknowledgePrimary');
-                                if (checkbox) {
-                                    const confirmBtn = Swal.getConfirmButton();
-                                    confirmBtn.disabled = true;
-                                    confirmBtn.style.opacity = '0.5';
-                                    confirmBtn.style.cursor = 'not-allowed';
-                                    
-                                    checkbox.addEventListener('change', function() {
-                                        if (this.checked) {
-                                            confirmBtn.disabled = false;
-                                            confirmBtn.style.opacity = '1';
-                                            confirmBtn.style.cursor = 'pointer';
-                                        } else {
-                                            confirmBtn.disabled = true;
-                                            confirmBtn.style.opacity = '0.5';
-                                            confirmBtn.style.cursor = 'not-allowed';
-                                        }
-                                    });
-                                }
-                            },
-                            preConfirm: () => {
-                                const notes = document.getElementById('responseNotes').value.trim();
-                                if (!notes) {
-                                    Swal.showValidationMessage('Please enter your response notes.');
+                                if (!checkbox || !checkbox.checked) {
+                                    Swal.showValidationMessage('Please acknowledge that you understand primary responders cannot cancel.');
                                     return false;
                                 }
-                                
-                                // Check if checkbox is required and checked
-                                if (willBePrimary) {
-                                    const checkbox = document.getElementById('acknowledgePrimary');
-                                    if (!checkbox || !checkbox.checked) {
-                                        Swal.showValidationMessage('Please acknowledge that you understand primary responders cannot cancel.');
-                                        return false;
-                                    }
-                                }
-                                
-                                return notes; // Pass notes to the next .then() block
                             }
-                        }).then((result) => {
-                            if (result.isConfirmed) {
-                        const responseNotes = result.value;
+                            return notes;
+                        },
+                    });
 
+                    if (result.isConfirmed) {
+                        const responseNotes = result.value;
                         responseBtn.disabled = true;
                         responseBtn.textContent = 'Processing...';
 
-                        $.ajax({
-                            url: '/responder/respond',
-                            method: 'POST',
-                            data: {
+                        $('.preloader').fadeIn(100);
+                        Swal.fire({
+                            title: 'Processing...',
+                            text: 'Please wait while we update your response.',
+                            allowOutsideClick: false,
+                            didOpen: () => { Swal.showLoading(); },
+                        });
+
+                        try {
+                            const data = await postFormData('/responder/respond', {
                                 type_of_response: 'response',
                                 report_id: {{ $report->id }},
                                 responder_id: {{ Auth::id() }},
                                 responding_unit: '{{ Auth::user()->responderDetail->department ?? 'null' }}',
                                 response_notes: responseNotes,
-                                _token: '{{ csrf_token() }}'
-                            },
-                            beforeSend: function () {
-                                $('.preloader').fadeIn(100);
+                            });
+
+                            if (data.status === 'success') {
+                                currentStatus = 'acknowledged';
+                                responderStatus = 'assigned';
+
+                                if (window.willBePrimaryAfterResponse === true) {
+                                    isPrimary = true;
+                                }
+
                                 Swal.fire({
-                                    title: 'Processing...',
-                                    text: 'Please wait while we update your response.',
-                                    allowOutsideClick: false,
-                                    didOpen: () => {
-                                        Swal.showLoading();
-                                    }
+                                    icon: 'success',
+                                    title: 'Success',
+                                    text: 'You have responded to this report.',
+                                    buttonsStyling: false,
+                                    customClass: { confirmButton: 'btn btn-success' },
                                 });
-                            },
-                            success: function (response) {
-                                if (response.status === 'success') {
-                                    currentStatus = 'acknowledged';
-                                    responderStatus = 'assigned'; // Update responder status
-                                    
-                                    // Update isPrimary if this responder became primary
-                                    if (window.willBePrimaryAfterResponse === true) {
-                                        isPrimary = true;
-                                    }
-                                    
-                                    Swal.fire({
-                                        icon: 'success',
-                                        title: 'Success',
-                                        text: 'You have responded to this report.',
-                                        buttonsStyling: false,
-                                        customClass: {
-                                            confirmButton: 'btn btn-success'
-                                        }
-                                    });
-                                    responseBtn.style.display = 'none';
-                                    dispatchBtn.style.display = 'inline-block';
-                                    updateCancelButtonVisibility(); // Update cancel button visibility
-                                } else {
-                                    Swal.fire({
-                                        icon: 'error',
-                                        title: 'Error',
-                                        text: response.message || 'Failed to update report.',
-                                        buttonsStyling: false,
-                                        customClass: {
-                                            confirmButton: 'btn btn-danger'
-                                        }
-                                    });
-                                }
-                            },
-                            error: function (xhr) {
-                                let errorMessage = 'An unexpected error occurred.';
-                                try {
-                                    const errorData = JSON.parse(xhr.responseText);
-                                    errorMessage = errorData.message || errorMessage;
-                                } catch (e) {
-                                    if (xhr.responseJSON && xhr.responseJSON.message) {
-                                        errorMessage = xhr.responseJSON.message;
-                                    } else if (xhr.responseText) {
-                                        errorMessage = xhr.responseText;
-                                    }
-                                }
+                                responseBtn.style.display = 'none';
+                                dispatchBtn.style.display = 'inline-block';
+                                updateCancelButtonVisibility();
+                            } else {
                                 Swal.fire({
                                     icon: 'error',
                                     title: 'Error',
-                                    text: errorMessage,
+                                    text: data.message || 'Failed to update report.',
                                     buttonsStyling: false,
-                                    customClass: {
-                                        confirmButton: 'btn btn-danger'
-                                    }
+                                    customClass: { confirmButton: 'btn btn-danger' },
                                 });
-                                console.error('Error:', xhr.responseText);
-                            },
-                            complete: function () {
-                                $('.preloader').fadeOut(100);
-                                responseBtn.disabled = false;
-                                responseBtn.textContent = 'Response';
                             }
-                        });
-                            }
-                        });
-                    })
-                    .catch(error => {
-                        console.error('Error checking responders:', error);
-                        Swal.fire({
-                            icon: 'error',
-                            title: 'Error',
-                            text: 'Failed to check responder status. Please try again.',
-                            buttonsStyling: false,
-                            customClass: {
-                                confirmButton: 'btn btn-danger'
-                            }
-                        });
+                        } catch (err) {
+                            Swal.fire({
+                                icon: 'error',
+                                title: 'Error',
+                                text: err.message || 'An unexpected error occurred.',
+                                buttonsStyling: false,
+                                customClass: { confirmButton: 'btn btn-danger' },
+                            });
+                            console.error('Error:', err);
+                        } finally {
+                            $('.preloader').fadeOut(100);
+                            responseBtn.disabled = false;
+                            responseBtn.textContent = 'Response';
+                        }
+                    }
+                } catch (error) {
+                    console.error('Error checking responders:', error);
+                    Swal.fire({
+                        icon: 'error',
+                        title: 'Error',
+                        text: 'Failed to check responder status. Please try again.',
+                        buttonsStyling: false,
+                        customClass: { confirmButton: 'btn btn-danger' },
                     });
+                }
             });
 
-            dispatchBtn.addEventListener('click', function () {
+            dispatchBtn.addEventListener('click', async function () {
                 if (responderStatus !== 'assigned') {
                     Swal.fire({
                         icon: 'info',
                         title: 'Info',
                         text: 'You need to respond to the report first.',
                         buttonsStyling: false,
-                        customClass: {
-                            confirmButton: 'btn btn-info'
-                        }
+                        customClass: { confirmButton: 'btn btn-info' },
                     });
                     return;
                 }
-                Swal.fire({
+
+                const result = await Swal.fire({
                     title: 'Are you sure?',
                     text: 'You are about to dispatch to this emergency report.',
                     icon: 'warning',
@@ -420,113 +394,85 @@
                     cancelButtonText: 'Cancel',
                     customClass: {
                         confirmButton: 'btn btn-success',
-                        cancelButton: 'btn btn-secondary'
+                        cancelButton: 'btn btn-secondary',
                     },
-                    reverseButtons: true
-                }).then((result) => {
-                    if (result.isConfirmed) {
-                        $.ajax({
-                            url: '/responder/respond',
-                            method: 'POST',
-                            data: {
-                                type_of_response: 'dispatch',
-                                report_id: {{ $report->id }},
-                                responder_id: {{ Auth::id() }},
-                                _token: '{{ csrf_token() }}'
-                            },
-                            beforeSend: function () {
-                                $('.preloader').fadeIn(100);
-                                Swal.fire({
-                                    title: 'Processing...',
-                                    text: 'Please wait while we update your status.',
-                                    allowOutsideClick: false,
-                                    didOpen: () => {
-                                        Swal.showLoading();
-                                    }
-                                });
-                            },
-                            success: function (response) {
-                                $('#responder-stats').css('display', '');
-                                currentStatus = 'dispatched';
-                                responderStatus = 'en_route';
-
-                                dispatchBtn.disabled = true;
-                                dispatchBtn.style.display = 'none';
-                                inProgressBtn.style.display = 'inline-block';
-                                updateCancelButtonVisibility(); // Update cancel button visibility
-
-                                if (response.status === 'success') {
-                                    Swal.fire({
-                                        icon: 'success',
-                                        title: 'Success',
-                                        text: 'Status updated to Dispatched.',
-                                        buttonsStyling: false,
-                                        customClass: {
-                                            confirmButton: 'btn btn-success'
-                                        }
-                                    });
-                                    // Send location immediately when dispatched (for both primary and secondary responders)
-                                    if (navigator.geolocation) {
-                                        navigator.geolocation.getCurrentPosition(function(position) {
-                                            const data = {
-                                                latitude: position.coords.latitude,
-                                                longitude: position.coords.longitude,
-                                                report_id: {{ $report->id }},
-                                                responder_id: {{ Auth::id() }},
-                                                responder_name: '{{ Auth::user()->name }}',
-                                                severity_level: '{{ $report->severity_level }}'
-                                            };
-                                            sendLocation(data);
-                                        }, function(error) {
-                                            console.error('Error getting location:', error);
-                                            // Still start location tracking
-                                            responderLocation();
-                                        });
-                                    }
-                                    responderLocation();
-                                } else {
-                                    Swal.fire({
-                                        icon: 'error',
-                                        title: 'Error',
-                                        text: response.message || 'Failed to update report.',
-                                        buttonsStyling: false,
-                                        customClass: {
-                                            confirmButton: 'btn btn-danger'
-                                        }
-                                    });
-                                }
-                            },
-                            error: function (xhr) {
-                                let errorMessage = 'An unexpected error occurred.';
-                                try {
-                                    const errorData = JSON.parse(xhr.responseText);
-                                    errorMessage = errorData.message || errorMessage;
-                                } catch (e) {
-                                    if (xhr.responseJSON && xhr.responseJSON.message) {
-                                        errorMessage = xhr.responseJSON.message;
-                                    } else if (xhr.responseText) {
-                                        errorMessage = xhr.responseText;
-                                    }
-                                }
-                                Swal.fire({
-                                    icon: 'error',
-                                    title: 'Error',
-                                    text: errorMessage,
-                                    buttonsStyling: false,
-                                    customClass: {
-                                        confirmButton: 'btn btn-danger'
-                                    }
-                                });
-                                console.error('Error:', xhr.responseText);
-                            },
-                            complete: function () {
-                                $('.preloader').fadeOut(100);
-                                dispatchBtn.disabled = false;
-                                dispatchBtn.textContent = 'Dispatch';
-                            }
-                        });
-                    }
+                    reverseButtons: true,
                 });
+
+                if (result.isConfirmed) {
+                    $('.preloader').fadeIn(100);
+                    Swal.fire({
+                        title: 'Processing...',
+                        text: 'Please wait while we update your status.',
+                        allowOutsideClick: false,
+                        didOpen: () => { Swal.showLoading(); },
+                    });
+
+                    try {
+                        const data = await postFormData('/responder/respond', {
+                            type_of_response: 'dispatch',
+                            report_id: {{ $report->id }},
+                            responder_id: {{ Auth::id() }},
+                        });
+
+                        $('#responder-stats').css('display', '');
+                        currentStatus = 'dispatched';
+                        responderStatus = 'en_route';
+
+                        dispatchBtn.disabled = true;
+                        dispatchBtn.style.display = 'none';
+                        inProgressBtn.style.display = 'inline-block';
+                        updateCancelButtonVisibility();
+
+                        if (data.status === 'success') {
+                            Swal.fire({
+                                icon: 'success',
+                                title: 'Success',
+                                text: 'Status updated to Dispatched.',
+                                buttonsStyling: false,
+                                customClass: { confirmButton: 'btn btn-success' },
+                            });
+                            if (navigator.geolocation) {
+                                navigator.geolocation.getCurrentPosition(function (position) {
+                                    const locData = {
+                                        latitude: position.coords.latitude,
+                                        longitude: position.coords.longitude,
+                                        report_id: {{ $report->id }},
+                                        responder_id: {{ Auth::id() }},
+                                        responder_name: '{{ Auth::user()->name }}',
+                                        severity_level: '{{ $report->severity_level }}',
+                                    };
+                                    sendLocation(locData);
+                                }, function (error) {
+                                    console.error('Error getting location:', error);
+                                    responderLocation();
+                                });
+                            }
+                            responderLocation();
+                        } else {
+                            Swal.fire({
+                                icon: 'error',
+                                title: 'Error',
+                                text: data.message || 'Failed to update report.',
+                                buttonsStyling: false,
+                                customClass: { confirmButton: 'btn btn-danger' },
+                            });
+                        }
+                    } catch (err) {
+                        Swal.fire({
+                            icon: 'error',
+                            title: 'Error',
+                            text: err.message || 'An unexpected error occurred.',
+                            buttonsStyling: false,
+                            customClass: { confirmButton: 'btn btn-danger' },
+                        });
+                        console.error('Error:', err);
+                    } finally {
+                        $('.preloader').fadeOut(100);
+                        dispatchBtn.disabled = false;
+                        dispatchBtn.textContent = 'Dispatch';
+                    }
+                }
             });
 
             inProgressBtn.addEventListener('click', function () {
@@ -606,246 +552,178 @@
                     }
                 }
 
-                function proceedWithArrival() {
-                    $.ajax({
-                        url: '/responder/respond',
-                        method: 'POST',
-                        data: {
+                async function proceedWithArrival() {
+                    $('.preloader').fadeIn(100);
+                    Swal.fire({
+                        title: 'Processing...',
+                        text: 'Please wait while we update your status.',
+                        allowOutsideClick: false,
+                        didOpen: () => { Swal.showLoading(); },
+                    });
+
+                    try {
+                        const data = await postFormData('/responder/respond', {
                             type_of_response: 'arrival',
                             report_id: {{ $report->id }},
                             responder_id: {{ Auth::id() }},
-                            _token: '{{ csrf_token() }}'
-                        },
-                        beforeSend: function () {
-                            $('.preloader').fadeIn(100);
+                        });
+
+                        if (data.status === 'success') {
+                            currentStatus = 'in_progress';
+                            responderStatus = 'on_scene';
+                            $('#responder-stats').css('display', 'none');
+
                             Swal.fire({
-                                title: 'Processing...',
-                                text: 'Please wait while we update your status.',
-                                allowOutsideClick: false,
-                                didOpen: () => {
-                                    Swal.showLoading();
-                                }
+                                icon: 'success',
+                                title: 'Success',
+                                text: 'Status updated to In Progress.',
+                                buttonsStyling: false,
+                                customClass: { confirmButton: 'btn btn-success' },
                             });
-                        },
-                        success: function (response) {
-                            if (response.status === 'success') {
-                                currentStatus = 'in_progress';
-                                responderStatus = 'on_scene';
 
-                                // Location tracking continues for 'on_scene' status
-                                // Stats are hidden when on scene (no longer en route)
-                                $('#responder-stats').css('display', 'none');
-
-                                Swal.fire({
-                                    icon: 'success',
-                                    title: 'Success',
-                                    text: 'Status updated to In Progress.',
-                                    buttonsStyling: false,
-                                    customClass: {
-                                        confirmButton: 'btn btn-success'
-                                    }
-                                });
-
-                                inProgressBtn.disabled = true;
-                                inProgressBtn.style.display = 'none';
-                                // Show "Use Resources" button after arrival
-                                document.getElementById('useResourcesBtn').style.display = 'inline-block';
-                                // Only show resolve button if responder is primary
-                                if (isPrimary) {
-                                    resolveBtn.style.display = 'inline-block';
-                                }
-                                updateCancelButtonVisibility(); // Update cancel button visibility
-                            } else {
-                                Swal.fire({
-                                    icon: 'error',
-                                    title: 'Error',
-                                    text: response.message || 'Failed to update report.',
-                                    buttonsStyling: false,
-                                    customClass: {
-                                        confirmButton: 'btn btn-danger'
-                                    }
-                                });
+                            inProgressBtn.disabled = true;
+                            inProgressBtn.style.display = 'none';
+                            document.getElementById('useResourcesBtn').style.display = 'inline-block';
+                            if (isPrimary) {
+                                resolveBtn.style.display = 'inline-block';
                             }
-                        },
-                        error: function (xhr) {
-                            let errorMessage = 'An unexpected error occurred.';
-                            try {
-                                const errorData = JSON.parse(xhr.responseText);
-                                errorMessage = errorData.message || errorMessage;
-                            } catch (e) {
-                                if (xhr.responseJSON && xhr.responseJSON.message) {
-                                    errorMessage = xhr.responseJSON.message;
-                                } else if (xhr.responseText) {
-                                    errorMessage = xhr.responseText;
-                                }
-                            }
+                            updateCancelButtonVisibility();
+                        } else {
                             Swal.fire({
                                 icon: 'error',
                                 title: 'Error',
-                                text: errorMessage,
+                                text: data.message || 'Failed to update report.',
                                 buttonsStyling: false,
-                                customClass: {
-                                    confirmButton: 'btn btn-danger'
-                                }
+                                customClass: { confirmButton: 'btn btn-danger' },
                             });
-                            console.error('Error:', xhr.responseText);
-                        },
-                        complete: function () {
-                            $('.preloader').fadeOut(100);
-                            inProgressBtn.disabled = false;
-                            inProgressBtn.textContent = 'Arrival & Responding';
                         }
-                    });
+                    } catch (err) {
+                        Swal.fire({
+                            icon: 'error',
+                            title: 'Error',
+                            text: err.message || 'An unexpected error occurred.',
+                            buttonsStyling: false,
+                            customClass: { confirmButton: 'btn btn-danger' },
+                        });
+                        console.error('Error:', err);
+                    } finally {
+                        $('.preloader').fadeOut(100);
+                        inProgressBtn.disabled = false;
+                        inProgressBtn.textContent = 'Arrival & Responding';
+                    }
                 }
 
                 // Start the validation process
                 validateAndProceed();
             });
             
-            resolveBtn.addEventListener('click', function () {
-                // Only primary responder can resolve
+            resolveBtn.addEventListener('click', async function () {
                 if (!isPrimary) {
                     Swal.fire({
                         icon: 'error',
                         title: 'Access Denied',
                         text: 'Only the primary responder can resolve this report.',
                         buttonsStyling: false,
-                        customClass: {
-                            confirmButton: 'btn btn-danger'
-                        }
+                        customClass: { confirmButton: 'btn btn-danger' },
                     });
                     return;
                 }
-                
+
                 if (responderStatus !== 'on_scene') {
                     Swal.fire({
                         icon: 'info',
                         title: 'Info',
                         text: 'You need to be In Progress to resolve the report.',
                         buttonsStyling: false,
-                        customClass: {
-                            confirmButton: 'btn btn-info'
-                        }
+                        customClass: { confirmButton: 'btn btn-info' },
                     });
                     return;
                 }
-                
-                const resolveTitle = 'Resolve Report';
-                const resolveText = 'You are about to mark this report as resolved. This will update all responder statuses.';
-                
-                Swal.fire({
-                    title: resolveTitle,
-                    text: resolveText,
+
+                const result = await Swal.fire({
+                    title: 'Resolve Report',
+                    text: 'You are about to mark this report as resolved. This will update all responder statuses.',
                     icon: 'warning',
                     showCancelButton: true,
                     confirmButtonText: 'Resolve',
                     cancelButtonText: 'Cancel',
                     customClass: {
                         confirmButton: 'btn btn-success',
-                        cancelButton: 'btn btn-secondary'
+                        cancelButton: 'btn btn-secondary',
                     },
-                    reverseButtons: true
-                }).then((result) => {
-                    if (result.isConfirmed) {
-                        $.ajax({
-                            url: '/responder/respond',
-                            method: 'POST',
-                            data: {
-                                type_of_response: 'resolve',
-                                report_id: {{ $report->id }},
-                                responder_id: {{ Auth::id() }},
-                                _token: '{{ csrf_token() }}'
-                            },
-                            beforeSend: function () {
-                                $('.preloader').fadeIn(100);
-                                Swal.fire({
-                                    title: 'Processing...',
-                                    text: 'Please wait while we update the report status.',
-                                    allowOutsideClick: false,
-                                    didOpen: () => {
-                                        Swal.showLoading();
-                                    }
-                                });
-                            },
-                            success: function (response) {
-                                if (response.status === 'success') {
-                                    currentStatus = 'resolved';
-                                    responderStatus = 'completed';
-
-                                    // Stop location tracking when resolved
-                                    stopLocationTracking();
-
-                                    resolveBtn.disabled = true;
-                                    resolveBtn.style.display = 'none';
-                                    document.getElementById('useResourcesBtn').style.display = 'none';
-                                    updateCancelButtonVisibility(); // Update cancel button visibility
-                                    responseResolved();
-
-                                    const isPrimary = {{ ($responderAssignment && $responderAssignment->role === 'primary') ? 'true' : 'false' }};
-                                    const successMessage = isPrimary 
-                                        ? 'The report has been resolved. All responder statuses have been updated.' 
-                                        : 'Your response has been marked as completed.';
-                                    
-                                    Swal.fire({
-                                        icon: 'success',
-                                        title: 'Success',
-                                        text: successMessage,
-                                        buttonsStyling: false,
-                                        customClass: {
-                                            confirmButton: 'btn btn-success'
-                                        }
-                                    }).then((result) => {
-                                        if (result.isConfirmed || result.isDismissed) {
-                                            window.location.href = '{{ route("dashboard") }}'
-                                        }
-                                    });
-                                } else {
-                                    Swal.fire({
-                                        icon: 'error',
-                                        title: 'Error',
-                                        text: response.message || 'Failed to update report.',
-                                        buttonsStyling: false,
-                                        customClass: {
-                                            confirmButton: 'btn btn-danger'
-                                        }
-                                    });
-                                }
-                            },
-                            error: function (xhr) {
-                                let errorMessage = 'An unexpected error occurred.';
-                                try {
-                                    const errorData = JSON.parse(xhr.responseText);
-                                    errorMessage = errorData.message || errorMessage;
-                                } catch (e) {
-                                    if (xhr.responseJSON && xhr.responseJSON.message) {
-                                        errorMessage = xhr.responseJSON.message;
-                                    } else if (xhr.responseText) {
-                                        errorMessage = xhr.responseText;
-                                    }
-                                }
-                                Swal.fire({
-                                    icon: 'error',
-                                    title: 'Error',
-                                    text: errorMessage,
-                                    buttonsStyling: false,
-                                    customClass: {
-                                        confirmButton: 'btn btn-danger'
-                                    }
-                                });
-                                console.error('Error:', xhr.responseText);
-                            },
-                            complete: function () {
-                                $('.preloader').fadeOut(100);
-                                resolveBtn.disabled = false;
-                                resolveBtn.textContent = 'Resolve';
-                            }
-                        });
-                    }
+                    reverseButtons: true,
                 });
+
+                if (result.isConfirmed) {
+                    $('.preloader').fadeIn(100);
+                    Swal.fire({
+                        title: 'Processing...',
+                        text: 'Please wait while we update the report status.',
+                        allowOutsideClick: false,
+                        didOpen: () => { Swal.showLoading(); },
+                    });
+
+                    try {
+                        const data = await postFormData('/responder/respond', {
+                            type_of_response: 'resolve',
+                            report_id: {{ $report->id }},
+                            responder_id: {{ Auth::id() }},
+                        });
+                    
+                        
+
+                        if (data.status === 'success') {
+                            currentStatus = 'resolved';
+                            responderStatus = 'completed';
+
+                            stopLocationTracking();
+                            resolveBtn.disabled = true;
+                            resolveBtn.style.display = 'none';
+                            document.getElementById('useResourcesBtn').style.display = 'none';
+                            updateCancelButtonVisibility();
+                            responseResolved();
+
+                            const isPrimaryLocal = {{ ($responderAssignment && $responderAssignment->role === 'primary') ? 'true' : 'false' }};
+                            const successMessage = isPrimaryLocal
+                                ? 'The report has been resolved. All responder statuses have been updated.'
+                                : 'Your response has been marked as completed.';
+
+                            Swal.fire({
+                                icon: 'success',
+                                title: 'Success',
+                                text: successMessage,
+                                buttonsStyling: false,
+                                customClass: { confirmButton: 'btn btn-success' },
+                            }).then(() => {
+                                window.location.href = '{{ route("dashboard") }}';
+                            });
+                        } else {
+                            Swal.fire({
+                                icon: 'error',
+                                title: 'Error',
+                                text: data.message || 'Failed to update report.',
+                                buttonsStyling: false,
+                                customClass: { confirmButton: 'btn btn-danger' },
+                            });
+                        }
+                    } catch (err) {
+                        Swal.fire({
+                            icon: 'error',
+                            title: 'Error',
+                            text: err.message || 'An unexpected error occurred.',
+                            buttonsStyling: false,
+                            customClass: { confirmButton: 'btn btn-danger' },
+                        });
+                        console.error('Error:', err);
+                    } finally {
+                        $('.preloader').fadeOut(100);
+                        resolveBtn.disabled = false;
+                        resolveBtn.textContent = 'Resolve';
+                    }
+                }
             });
         
-            cancelBtn.addEventListener('click', function () {
-                // Primary responders cannot cancel - show alert with checkbox
+            cancelBtn.addEventListener('click', async function () {
                 if (isPrimary) {
                     Swal.fire({
                         icon: 'info',
@@ -864,19 +742,17 @@
                         buttonsStyling: false,
                         customClass: {
                             confirmButton: 'btn btn-primary',
-                            popup: 'text-start'
+                            popup: 'text-start',
                         },
                         didOpen: () => {
                             const checkbox = document.getElementById('acknowledgeCancel');
                             const confirmBtn = Swal.getConfirmButton();
-                            
-                            // Disable confirm button initially
+
                             confirmBtn.disabled = true;
                             confirmBtn.style.opacity = '0.5';
                             confirmBtn.style.cursor = 'not-allowed';
-                            
-                            // Enable confirm button when checkbox is checked
-                            checkbox.addEventListener('change', function() {
+
+                            checkbox.addEventListener('change', function () {
                                 if (this.checked) {
                                     confirmBtn.disabled = false;
                                     confirmBtn.style.opacity = '1';
@@ -887,26 +763,23 @@
                                     confirmBtn.style.cursor = 'not-allowed';
                                 }
                             });
-                        }
+                        },
                     });
                     return;
                 }
-                
-                // For secondary responders, allow cancel unless completed or cancelled
+
                 if (responderStatus === 'completed' || responderStatus === 'cancelled' || responderStatus === 'null' || !responderStatus) {
                     Swal.fire({
                         icon: 'info',
                         title: 'Info',
                         text: 'Cannot cancel at this stage.',
                         buttonsStyling: false,
-                        customClass: {
-                            confirmButton: 'btn btn-info'
-                        }
+                        customClass: { confirmButton: 'btn btn-info' },
                     });
                     return;
                 }
 
-                Swal.fire({
+                const result = await Swal.fire({
                     title: 'Cancel Response',
                     text: 'You are about to cancel your response to this report.',
                     icon: 'warning',
@@ -916,100 +789,72 @@
                     buttonsStyling: false,
                     customClass: {
                         confirmButton: 'btn btn-danger',
-                        cancelButton: 'btn btn-secondary'
+                        cancelButton: 'btn btn-secondary',
                     },
-                    reverseButtons: true
-                }).then((result) => {
-                    if (result.isConfirmed) {
-                        $.ajax({
-                            url: '/responder/respond',
-                            method: 'POST',
-                            data: {
-                                type_of_response: 'cancel',
-                                report_id: {{ $report->id }},
-                                responder_id: {{ Auth::id() }},
-                                _token: '{{ csrf_token() }}'
-                            },
-                            beforeSend: function () {
-                                $('.preloader').fadeIn(100);
-                                Swal.fire({
-                                    title: 'Processing...',
-                                    text: 'Please wait while we cancel your response.',
-                                    allowOutsideClick: false,
-                                    didOpen: () => {
-                                        Swal.showLoading();
-                                    }
-                                });
-                            },
-                            success: function (response) {
-                                if (response.status === 'success') {
-                                    currentStatus = 'pending';
-                                    responderStatus = 'cancelled';
-
-                                    // Stop location tracking when cancelled
-                                    stopLocationTracking();
-                                    responseResolved();
-
-                                    // Update UI to reflect cancelled state
-                                    responseBtn.style.display = 'inline-block';
-                                    dispatchBtn.style.display = 'none';
-                                    inProgressBtn.style.display = 'none';
-                                    resolveBtn.style.display = 'none';
-                                    document.getElementById('useResourcesBtn').style.display = 'none';
-                                    updateCancelButtonVisibility(); // Hide cancel button
-
-                                    Swal.fire({
-                                        icon: 'success',
-                                        title: 'Success',
-                                        text: 'Your response has been cancelled.',
-                                        buttonsStyling: false,
-                                        customClass: {
-                                            confirmButton: 'btn btn-success'
-                                        }
-                                    });
-                                } else {
-                                    Swal.fire({
-                                        icon: 'error',
-                                        title: 'Error',
-                                        text: response.message || 'Failed to cancel response.',
-                                        buttonsStyling: false,
-                                        customClass: {
-                                            confirmButton: 'btn btn-danger'
-                                        }
-                                    });
-                                }
-                            },
-                            error: function (xhr) {
-                                let errorMessage = 'An unexpected error occurred.';
-                                try {
-                                    const errorData = JSON.parse(xhr.responseText);
-                                    errorMessage = errorData.message || errorMessage;
-                                } catch (e) {
-                                    if (xhr.responseJSON && xhr.responseJSON.message) {
-                                        errorMessage = xhr.responseJSON.message;
-                                    } else if (xhr.responseText) {
-                                        errorMessage = xhr.responseText;
-                                    }
-                                }
-                                Swal.fire({
-                                    icon: 'error',
-                                    title: 'Error',
-                                    text: errorMessage,
-                                    buttonsStyling: false,
-                                    customClass: {
-                                        confirmButton: 'btn btn-danger'
-                                    }
-                                });
-                                console.error('Error:', xhr.responseText);
-                            },
-                            complete: function () {
-                                $('.preloader').fadeOut(100);
-                                cancelBtn.disabled = false;
-                                cancelBtn.textContent = 'Cancel';
-                            }
-                        });
-                    }
+                    reverseButtons: true,
                 });
+
+                if (result.isConfirmed) {
+                    $('.preloader').fadeIn(100);
+                    Swal.fire({
+                        title: 'Processing...',
+                        text: 'Please wait while we cancel your response.',
+                        allowOutsideClick: false,
+                        didOpen: () => { Swal.showLoading(); },
+                    });
+
+                    try {
+                        const data = await postFormData('/responder/respond', {
+                            type_of_response: 'cancel',
+                            report_id: {{ $report->id }},
+                            responder_id: {{ Auth::id() }},
+                        });
+
+                        if (data.status === 'success') {
+                            currentStatus = 'pending';
+                            responderStatus = 'cancelled';
+
+                            stopLocationTracking();
+                            responseResolved();
+
+                            responseBtn.style.display = 'inline-block';
+                            dispatchBtn.style.display = 'none';
+                            inProgressBtn.style.display = 'none';
+                            resolveBtn.style.display = 'none';
+                            document.getElementById('useResourcesBtn').style.display = 'none';
+                            updateCancelButtonVisibility();
+
+                            Swal.fire({
+                                icon: 'success',
+                                title: 'Success',
+                                text: 'Your response has been cancelled.',
+                                buttonsStyling: false,
+                                customClass: { confirmButton: 'btn btn-success' },
+                            });
+                        } else {
+                            Swal.fire({
+                                icon: 'error',
+                                title: 'Error',
+                                text: data.message || 'Failed to cancel response.',
+                                buttonsStyling: false,
+                                customClass: { confirmButton: 'btn btn-danger' },
+                            });
+                        }
+                    } catch (err) {
+                        Swal.fire({
+                            icon: 'error',
+                            title: 'Error',
+                            text: err.message || 'An unexpected error occurred.',
+                            buttonsStyling: false,
+                            customClass: { confirmButton: 'btn btn-danger' },
+                        });
+                        console.error('Error:', err);
+                    } finally {
+                        $('.preloader').fadeOut(100);
+                        cancelBtn.disabled = false;
+                        cancelBtn.textContent = 'Cancel';
+                    }
+                }
             });
         });
        
@@ -1028,20 +873,20 @@
             etaEl.textContent = `${etaMin} mins`;
         }
 
-        function sendLocation(data) {
-            fetch('/send-location', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').getAttribute('content')
-                },
-                body: JSON.stringify(data)
-            })
-                .then(response => response.json())
-                .then(data => {
-                    // console.log('Location sent successfully', data);
-                })
-                .catch(err => console.error('Error sending location', err));
+        async function sendLocation(data) {
+            try {
+                const response = await fetch('/send-location', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRF-TOKEN': getCsrfToken(),
+                    },
+                    body: JSON.stringify(data),
+                });
+                await response.json();
+            } catch (err) {
+                console.error('Error sending location', err);
+            }
         }
 
         function responseResolved() {
@@ -1125,10 +970,20 @@
             // }
 
             // Center map on responder location
-            responderMap.panTo([latitude, longitude], { 
-                animate: true, 
-                duration: 0.5 
-            });
+            // Amount of vertical offset in pixels (how far from the bottom)
+            const yOffset = 300; // adjust as needed
+
+            // Convert the responder's lat/lng to pixel coordinates
+            const point = responderMap.latLngToContainerPoint([latitude, longitude]);
+
+            // Move the point up by yOffset pixels
+            const shiftedPoint = L.point(point.x, point.y - yOffset);
+
+            // Convert back to geographic coordinates
+            const newLatLng = responderMap.containerPointToLatLng(shiftedPoint);
+
+            // Pan map to the new "shifted" center
+            responderMap.panTo(newLatLng, { animate: true, duration: 0.5 });
 
             // Zoom to max after initial load when moving (only if not already at max)
             if (hasInitialZoom) {
@@ -1435,55 +1290,53 @@
             });
         }
 
-        function loadAvailableResources() {
-            $.ajax({
-                url: '/resources/available',
-                method: 'GET',
-                headers: {
-                    'X-CSRF-TOKEN': $('meta[name="csrf-token"]').attr('content'),
-                    'Accept': 'application/json'
-                },
-                data: {
-                    report_id: {{ $report->id }}
-                },
-                success: function(response) {
-                    if (response.status === 'success') {
-                        showResourcesModal(response.availableResources, response.assignedResources);
-                    } else {
-                        Swal.fire({
-                            icon: 'error',
-                            title: 'Error',
-                            text: response.message || 'Failed to load resources.',
-                            buttonsStyling: false,
-                            customClass: {
-                                confirmButton: 'btn btn-danger'
-                            }
-                        });
-                    }
-                },
-                error: function(xhr, status, error) {
-                    console.error('Error loading resources:', xhr, status, error);
+        async function loadAvailableResources() {
+            try {
+                const response = await fetch(`/resources/available?report_id={{ $report->id }}`, {
+                    method: 'GET',
+                    headers: {
+                        'X-CSRF-TOKEN': getCsrfToken(),
+                        'Accept': 'application/json',
+                    },
+                });
+
+                if (!response.ok) {
                     let errorMessage = 'Failed to load resources.';
-                    if (xhr.responseJSON && xhr.responseJSON.message) {
-                        errorMessage = xhr.responseJSON.message;
-                    } else if (xhr.status === 403) {
-                        errorMessage = 'You are not authorized to view resources.';
-                    } else if (xhr.status === 404) {
-                        errorMessage = 'Resources endpoint not found.';
-                    } else if (xhr.status === 500) {
-                        errorMessage = 'Server error. Please try again later.';
-                    }
+                    if (response.status === 403) errorMessage = 'You are not authorized to view resources.';
+                    else if (response.status === 404) errorMessage = 'Resources endpoint not found.';
+                    else if (response.status === 500) errorMessage = 'Server error. Please try again later.';
                     Swal.fire({
                         icon: 'error',
                         title: 'Error',
                         text: errorMessage,
                         buttonsStyling: false,
-                        customClass: {
-                            confirmButton: 'btn btn-danger'
-                        }
+                        customClass: { confirmButton: 'btn btn-danger' },
+                    });
+                    return;
+                }
+
+                const data = await response.json();
+                if (data.status === 'success') {
+                    showResourcesModal(data.availableResources, data.assignedResources);
+                } else {
+                    Swal.fire({
+                        icon: 'error',
+                        title: 'Error',
+                        text: data.message || 'Failed to load resources.',
+                        buttonsStyling: false,
+                        customClass: { confirmButton: 'btn btn-danger' },
                     });
                 }
-            });
+            } catch (error) {
+                console.error('Error loading resources:', error);
+                Swal.fire({
+                    icon: 'error',
+                    title: 'Error',
+                    text: 'Failed to load resources.',
+                    buttonsStyling: false,
+                    customClass: { confirmButton: 'btn btn-danger' },
+                });
+            }
         }
 
         function showResourcesModal(availableResources, assignedResources) {
@@ -1556,56 +1409,43 @@
             });
         }
 
-        function assignResource(resourceId) {
-            $.ajax({
-                url: `/resources/${resourceId}/assign`,
-                method: 'POST',
-                data: {
+        async function assignResource(resourceId) {
+            try {
+                const data = await postFormData(`/resources/${resourceId}/assign`, {
                     report_id: {{ $report->id }},
-                    _token: '{{ csrf_token() }}'
-                },
-                success: function(response) {
-                    if (response.status === 'success') {
-                        Swal.fire({
-                            icon: 'success',
-                            title: 'Success',
-                            text: 'Resource assigned successfully.',
-                            buttonsStyling: false,
-                            customClass: {
-                                confirmButton: 'btn btn-success'
-                            }
-                        }).then(() => {
-                            loadAvailableResources();
-                        });
-                    } else {
-                        Swal.fire({
-                            icon: 'error',
-                            title: 'Error',
-                            text: response.message || 'Failed to assign resource.',
-                            buttonsStyling: false,
-                            customClass: {
-                                confirmButton: 'btn btn-danger'
-                            }
-                        });
-                    }
-                },
-                error: function(xhr) {
-                    const message = xhr.responseJSON?.message || 'Failed to assign resource.';
+                });
+
+                if (data.status === 'success') {
+                    await Swal.fire({
+                        icon: 'success',
+                        title: 'Success',
+                        text: 'Resource assigned successfully.',
+                        buttonsStyling: false,
+                        customClass: { confirmButton: 'btn btn-success' },
+                    });
+                    loadAvailableResources();
+                } else {
                     Swal.fire({
                         icon: 'error',
                         title: 'Error',
-                        text: message,
+                        text: data.message || 'Failed to assign resource.',
                         buttonsStyling: false,
-                        customClass: {
-                            confirmButton: 'btn btn-danger'
-                        }
+                        customClass: { confirmButton: 'btn btn-danger' },
                     });
                 }
-            });
+            } catch (err) {
+                Swal.fire({
+                    icon: 'error',
+                    title: 'Error',
+                    text: err.message || 'Failed to assign resource.',
+                    buttonsStyling: false,
+                    customClass: { confirmButton: 'btn btn-danger' },
+                });
+            }
         }
 
-        function releaseResource(resourceId) {
-            Swal.fire({
+        async function releaseResource(resourceId) {
+            const result = await Swal.fire({
                 title: 'Release Resource?',
                 text: 'Are you sure you want to release this resource?',
                 icon: 'warning',
@@ -1615,56 +1455,42 @@
                 buttonsStyling: false,
                 customClass: {
                     confirmButton: 'btn btn-danger',
-                    cancelButton: 'btn btn-secondary'
-                }
-            }).then((result) => {
-                if (result.isConfirmed) {
-                    $.ajax({
-                        url: `/resources/${resourceId}/release`,
-                        method: 'POST',
-                        data: {
-                            _token: '{{ csrf_token() }}'
-                        },
-                        success: function(response) {
-                            if (response.status === 'success') {
-                                Swal.fire({
-                                    icon: 'success',
-                                    title: 'Success',
-                                    text: 'Resource released successfully.',
-                                    buttonsStyling: false,
-                                    customClass: {
-                                        confirmButton: 'btn btn-success'
-                                    }
-                                }).then(() => {
-                                    loadAvailableResources();
-                                });
-                            } else {
-                                Swal.fire({
-                                    icon: 'error',
-                                    title: 'Error',
-                                    text: response.message || 'Failed to release resource.',
-                                    buttonsStyling: false,
-                                    customClass: {
-                                        confirmButton: 'btn btn-danger'
-                                    }
-                                });
-                            }
-                        },
-                        error: function(xhr) {
-                            const message = xhr.responseJSON?.message || 'Failed to release resource.';
-                            Swal.fire({
-                                icon: 'error',
-                                title: 'Error',
-                                text: message,
-                                buttonsStyling: false,
-                                customClass: {
-                                    confirmButton: 'btn btn-danger'
-                                }
-                            });
-                        }
+                    cancelButton: 'btn btn-secondary',
+                },
+            });
+
+            if (result.isConfirmed) {
+                try {
+                    const data = await postFormData(`/resources/${resourceId}/release`, {});
+
+                    if (data.status === 'success') {
+                        await Swal.fire({
+                            icon: 'success',
+                            title: 'Success',
+                            text: 'Resource released successfully.',
+                            buttonsStyling: false,
+                            customClass: { confirmButton: 'btn btn-success' },
+                        });
+                        loadAvailableResources();
+                    } else {
+                        Swal.fire({
+                            icon: 'error',
+                            title: 'Error',
+                            text: data.message || 'Failed to release resource.',
+                            buttonsStyling: false,
+                            customClass: { confirmButton: 'btn btn-danger' },
+                        });
+                    }
+                } catch (err) {
+                    Swal.fire({
+                        icon: 'error',
+                        title: 'Error',
+                        text: err.message || 'Failed to release resource.',
+                        buttonsStyling: false,
+                        customClass: { confirmButton: 'btn btn-danger' },
                     });
                 }
-            });
+            }
         }
     </script>
 
