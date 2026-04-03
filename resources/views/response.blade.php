@@ -180,7 +180,7 @@
         let isPrimary = {{ ($responderAssignment && $responderAssignment->role === 'primary') ? 'true' : 'false' }};
         
         // Test mode variables
-        let testFlag = true; // Set to true to enable test mode
+        let testFlag = false; // Set to true to enable test mode
         let testInterval = null;
         let testRouteCoordinates = [];
         let testCurrentIndex = 0;
