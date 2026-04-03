@@ -66,7 +66,7 @@ class MediaController extends Controller
                     continue;
                 }
                 $fileType = $this->getFileType($file->getMimeType());
-                $storagePath = "storage/emergency-reports";
+                $storagePath = "emergency-reports";
                 $fileName = uniqid() . '_' . time() . '.' . $file->getClientOriginalExtension();
                 
                 $filePath = $file->storeAs($storagePath, $fileName, 'public');
