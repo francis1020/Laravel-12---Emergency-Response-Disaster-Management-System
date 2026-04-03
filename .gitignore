@@ -1,24 +1,48 @@
-*.log
-.DS_Store
-.env
-.env.backup
-.env.production
-.phpactor.json
-.phpunit.result.cache
-/.fleet
-/.idea
-/.nova
-/.phpunit.cache
-/.vscode
-/.zed
-/auth.json
+# Laravel & PHP
+/vendor
 /node_modules
 /public/build
 /public/hot
 /public/storage
-/storage/*.key
-/storage/pail
-/vendor
 Homestead.json
 Homestead.yaml
+.env
+.env.*           # ignore all environment files
+.phpunit.result.cache
+.phpactor.json
+.phpunit.cache
+
+# OS & Editor files
+.DS_Store
 Thumbs.db
+/.idea
+/.vscode
+/.fleet
+/.zed
+/.nova
+/auth.json
+
+# Logs & caches
+*.log
+/storage/*.key
+/storage/pail
+/bootstrap/cache/*.php
+
+# Optional: ignore compiled front-end assets
+/public/mix-manifest.json
+/public/css/*.css
+/public/js/*.js
+
+# Ignore Mac, Windows, and IDE temporary files
+*.swp
+*.swo
+*.sublime-workspace
+*.sublime-project
+
+# Ignore personal files
+.env.backup
+.env.production
+
+# Optional: ignore npm/yarn lock files if you want
+# package-lock.json
+# yarn.lock
