@@ -971,6 +971,15 @@ function showMediaUpload() {
         });
         
         try {
+            Swal.fire({
+                title: 'Uploading...',
+                text: 'Please wait while your file is being uploaded.',
+                allowOutsideClick: false,
+                didOpen: () => {
+                    Swal.showLoading();
+                }
+            });
+
             const response = await fetch(`/reports/${reportId}/media`, {
                 method: 'POST',
                 headers: {
